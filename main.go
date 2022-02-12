@@ -18,6 +18,8 @@ func copyHeader(t, f http.Header) {
 
 func handler(w http.ResponseWriter, req *http.Request) {
 	req.RequestURI = ""
+	req.Header.Del("Proxy-Connection")
+
 	reqString, err := httputil.DumpRequest(req, true)
 	if err != nil {
 		fmt.Println(err)
@@ -43,6 +45,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 		fmt.Println(err)
 	}
 	fmt.Println("Response:\n" + string(respString))
+
 	copyHeader(w.Header(), resp.Header)
 	w.WriteHeader(resp.StatusCode)
 	io.Copy(w, resp.Body)
