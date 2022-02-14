@@ -54,7 +54,7 @@ func handler(w http.ResponseWriter, req *http.Request) {
 func main() {
 	fmt.Println("Run server")
 	http.HandleFunc("/", handler)
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8000", nil); err != nil {
 		log.Fatal(err)
 	}
 }
