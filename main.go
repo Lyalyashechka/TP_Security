@@ -1,11 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
+	"time"
 )
 
 func copyHeader(t, f http.Header) {
@@ -14,6 +17,53 @@ func copyHeader(t, f http.Header) {
 			t.Add(h, v)
 		}
 	}
+}
+
+type Handler struct {
+}
+
+func (p *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodConnect {
+		handlerHTTPS(w, r)
+	} else {
+		handler(w, r)
+	}
+}
+
+func connectHandshake(w http.ResponseWriter, r *http.Request) (net.Conn, error) {
+	conn, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return nil, err
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Connection established"))
+
+	return conn, nil
+}
+
+func connectHijacker(w http.ResponseWriter) (net.Conn, error) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+		return nil, errors.New("hijacking not supported")
+	}
+
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return nil, err
+	}
+
+	return conn, nil
+}
+
+func transfer(dest io.WriteCloser, src io.ReadCloser) {
+	defer dest.Close()
+	defer src.Close()
+
+	io.Copy(dest, src)
 }
 
 func handler(w http.ResponseWriter, req *http.Request) {
@@ -51,10 +101,36 @@ func handler(w http.ResponseWriter, req *http.Request) {
 	io.Copy(w, resp.Body)
 }
 
+func handlerHTTPS(w http.ResponseWriter, r *http.Request) {
+
+	destConn, err := connectHandshake(w, r)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Fatal("connectHandshake:", err)
+		return
+	}
+
+	srcConn, err := connectHijacker(w)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		log.Fatal("connectHijacker:", err)
+		return
+	}
+
+	go transfer(destConn, srcConn)
+	go transfer(srcConn, destConn)
+}
+
 func main() {
+	h := &Handler{}
+
+	server := http.Server{
+		Addr:    ":8080",
+		Handler: h,
+	}
+
 	fmt.Println("Run server")
-	http.HandleFunc("/", handler)
-	if err := http.ListenAndServe(":8000", nil); err != nil {
-		log.Fatal(err)
+	if err := server.ListenAndServe(); err != nil {
+		log.Fatalf(err.Error())
 	}
 }
